@@ -1,0 +1,46 @@
+name: zap-repay
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Run bot
+        env:
+          ZAP_BASE: https://cdb.zapbeast.com
+          ZAP_ADMIN_NAME: ${{ secrets.ZAP_ADMIN_NAME }}
+          ZAP_ADMIN_PASSWORD: ${{ secrets.ZAP_ADMIN_PASSWORD }}
+          ZAP_HEADLESS: "true"
+          ZAP_OUTPUT_JSON: unfinished_orders.json
+        run: python zap_playwright.py
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ github.run_id }}
+          path: |
+            unfinished_orders.json
+            unfinished_orders_repay_results.json
+            debug-*.png
+          retention-days: 7
+          if-no-files-found: ignore
