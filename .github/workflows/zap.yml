@@ -1,17 +1,9 @@
 name: zap-repay
 
 on:
-  # 30분 주기 유지하되 정각/30분 회피 (GitHub 부하 분산)
-  # - 매시 3분, 33분에 실행
   schedule:
-    - cron: "3,33 * * * *"
-  # 외부 스케줄러(cron-job.org 등)에서 강제 트리거 가능
+    - cron: "*/30 * * * *"
   workflow_dispatch:
-
-# 동시 실행 방지 (30분 내 중복 트리거 시 이전 실행 취소 없이 대기)
-concurrency:
-  group: zap-repay
-  cancel-in-progress: false
 
 jobs:
   run:
@@ -26,57 +18,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
 
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
           playwright install --with-deps chromium
 
-      # ★ 최근 25분 내 성공 실행이 있으면 skip (중복 방지)
-      # - schedule과 workflow_dispatch가 겹칠 때 불필요한 중복 실행 방지
-      - name: Check recent run (skip if duplicate)
-        id: check_recent
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          python - <<'PY'
-          import json, os, urllib.request, datetime
-          repo = os.environ["GITHUB_REPOSITORY"]
-          token = os.environ["GH_TOKEN"]
-          url = f"https://api.github.com/repos/{repo}/actions/workflows/zap-repay.yml/runs?per_page=5&status=completed"
-          req = urllib.request.Request(url, headers={
-              "Authorization": f"Bearer {token}",
-              "Accept": "application/vnd.github+json",
-          })
-          with urllib.request.urlopen(req) as r:
-              data = json.load(r)
-
-          now = datetime.datetime.now(datetime.timezone.utc)
-          recent_ok = False
-          for run in data.get("workflow_runs", []):
-              # 현재 실행 자신은 제외
-              if str(run["id"]) == os.environ.get("GITHUB_RUN_ID"):
-                  continue
-              if run.get("conclusion") != "success":
-                  continue
-              created = datetime.datetime.fromisoformat(
-                  run["created_at"].replace("Z", "+00:00")
-              )
-              diff_min = (now - created).total_seconds() / 60
-              print(f"최근 성공 실행: {run['id']} / {diff_min:.1f}분 전")
-              if diff_min < 25:
-                  recent_ok = True
-                  break
-
-          skip = "true" if recent_ok else "false"
-          print(f"skip={skip}")
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"skip={skip}\n")
-          PY
-
       - name: Run bot
-        if: steps.check_recent.outputs.skip != 'true'
         env:
           ZAP_BASE: https://cdb.zapbeast.com
           ZAP_ADMIN_NAME: ${{ secrets.ZAP_ADMIN_NAME }}
@@ -86,7 +34,7 @@ jobs:
         run: python zap_playwright.py
 
       - name: Upload results
-        if: always() && steps.check_recent.outputs.skip != 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: results-${{ github.run_id }}
